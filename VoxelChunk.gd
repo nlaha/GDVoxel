@@ -2,7 +2,8 @@
 extends VoxelChunk
 	
 func _ready():
-	call_deferred("load_mesh")
+	#call_deferred("load_mesh")
+	pass
 	
 func _process(delta):
 	pass

@@ -40,6 +40,8 @@ pub struct VoxelChunkManager {
     #[init(default = HashMap::new())]
     previous_chunk_positions: HashMap<String, Vector3>,
 
+    threaded_generator: Option<threaded_generator::ThreadedGenerator>,
+
     #[base]
     base: Base<Node3D>,
 }
@@ -103,7 +105,7 @@ impl VoxelChunkManager {
         return cur_center_chunk_coord + pos;
     }
 
-    fn hash_chunk_pos(&self, chunk_pos: Vector3) -> String {
+    pub fn hash_chunk_pos(chunk_pos: Vector3) -> String {
         let hash_string = format!("chunk_{}x_{}y_{}z", chunk_pos.x, chunk_pos.y, chunk_pos.z);
         return hash_string;
     }
@@ -134,61 +136,85 @@ impl VoxelChunkManager {
             cur_center_chunk_coord = self.spiral(i);
         }
 
-        godot_print!("[GDVoxel - Data Generator] Generating data...");
+        godot_print!("[GDVoxel - Data Generator] Requesting buffers from cache...");
+        let start = std::time::Instant::now();
         // generate chunk data
-        let buffers = &threaded_generator::generate_chunk_data(
-            self.voxel_size,
-            self.data_resolution,
-            self.seed,
-            chunk_positions.clone(),
-        );
+        let buffers = self
+            .threaded_generator
+            .as_mut()
+            .unwrap()
+            .generate_chunk_data(&chunk_positions);
         godot_print!("[GDVoxel - Data generator] Done!");
+        // print out time taken
+        let duration = start.elapsed();
+        godot_print!(
+            "[GDVoxel - Data generator] Time taken: {}ms",
+            duration.as_millis()
+        );
 
-        // spawn chunks
-        for i in 0..self.render_distance {
-            let hashed_chunk_coord = self.hash_chunk_pos(chunk_positions[i as usize]);
+        // // spawn chunks
+        // for i in 0..self.render_distance {
+        //     let hashed_chunk_coord = Self::hash_chunk_pos(chunk_positions[i as usize]);
 
-            // make sure hash doesn't already exist in the scene as a child
-            match self
-                .base
-                .find_child(format!("{}", hashed_chunk_coord).into())
-            {
-                Some(child) => {
-                    // if it does, skip this chunk and make it visible
-                    // cast to voxel chunk
-                    match child.try_cast::<VoxelChunk>() {
-                        Some(mut chunk) => {
-                            chunk.set_visible(true);
-                        }
-                        None => {
-                            // child not a voxel chunk, skip
-                        }
-                    }
-                    continue;
-                }
-                None => {
-                    // we haven't generated this chunk yet
-                }
-            }
+        //     // make sure hash doesn't already exist in the scene as a child
+        //     match self
+        //         .base
+        //         .find_child(format!("{}", hashed_chunk_coord).into())
+        //     {
+        //         Some(child) => {
+        //             // if it does, skip this chunk and make it visible
+        //             // cast to voxel chunk
+        //             match child.try_cast::<VoxelChunk>() {
+        //                 Some(mut chunk) => {
+        //                     chunk.set_visible(true);
 
-            // generate chunk
-            let mut chunk: Gd<VoxelChunk> = chunk_scene.instantiate_as::<VoxelChunk>();
+        //                     if !chunk.bind().generated {
+        //                         // we still need to generate this chunk even though it's already in the scene
+        //                         // check the cache for the corresponding buffer
+        //                         match &buffers[i as usize] {
+        //                             Some(buffer) => {
+        //                                 // load from buffer
+        //                                 chunk.bind_mut().load_from_buffer(&buffer.buffer);
+        //                             }
+        //                             None => {
+        //                                 // no buffer, skip
+        //                             }
+        //                         };
+        //                     }
+        //                 }
+        //                 None => {
+        //                     // child not a voxel chunk, skip
+        //                 }
+        //             }
+        //             continue;
+        //         }
+        //         None => {
+        //             // we haven't generated this chunk yet
+        //         }
+        //     }
 
-            // set position
-            chunk.set_position(chunk_positions[i as usize]);
+        //     // generate chunk
+        //     let mut chunk: Gd<VoxelChunk> = chunk_scene.instantiate_as::<VoxelChunk>();
 
-            // set name
-            chunk.set_name(hashed_chunk_coord.to_string().into());
+        //     // set position
+        //     chunk.set_position(chunk_positions[i as usize]);
 
-            // print out name
-            godot_print!("[GDVoxel] Chunk name: {}", chunk.get_name());
+        //     // set name
+        //     chunk.set_name(hashed_chunk_coord.to_string().into());
 
-            // load from buffer
-            chunk.bind_mut().load_from_buffer(&buffers[i as usize]);
+        //     match &buffers[i as usize] {
+        //         Some(buffer) => {
+        //             // load from buffer
+        //             chunk.bind_mut().load_from_buffer(&buffer.buffer);
+        //         }
+        //         None => {
+        //             // no buffer, skip
+        //         }
+        //     };
 
-            // add child
-            self.base.add_child(chunk.upcast::<Node>());
-        }
+        //     // add child
+        //     self.base.add_child(chunk.upcast::<Node>());
+        // }
 
         // loop through all children and hide ones that aren't present in the chunk positions
         for child in self.base.get_children().iter_shared() {
@@ -212,6 +238,13 @@ impl VoxelChunkManager {
 #[godot_api]
 impl Node3DVirtual for VoxelChunkManager {
     fn ready(&mut self) {
+        self.threaded_generator = Some(threaded_generator::ThreadedGenerator::initialize(
+            self.voxel_size,
+            self.data_resolution,
+            self.seed,
+            self.base.instance_id_or_none().unwrap(),
+        ));
+
         self.update_chunks();
     }
 }

@@ -20,7 +20,7 @@ sdfgi_enabled = true
 volumetric_fog_albedo = Color(0.603922, 0.603922, 0.603922, 1)
 volumetric_fog_ambient_inject = 1.51
 
-[node name="Node3D" type="Node3D"]
+[node name="Scene" type="Node3D"]
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3.25201)
@@ -35,9 +35,5 @@ shadow_enabled = true
 
 [node name="VoxelChunkManager" type="VoxelChunkManager" parent="."]
 chunk_scene = "C:/Users/nlaha/Desktop/Code/GDVoxel/voxel_chunk.tscn"
-data_resolution = 16
 render_distance = 32
 unique_name_in_owner = true
-process_thread_group = 2
-process_thread_group_order = 0
-process_thread_messages = 3
