@@ -9,6 +9,10 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+fast-surface-nets = "0.2.0"
 godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
 isosurface = "0.0.4"
+ndshape = "0.3.0"
 rand = "0.8.5"
+rayon = "1.7.0"
+tri-mesh = "0.6.0"
