@@ -12,7 +12,9 @@ use godot::engine::MeshInstance3DVirtual;
 use godot::engine::Node3D;
 use godot::prelude::*;
 
+use noise::SuperSimplex;
 use rand::prelude::*;
+use splines::{Interpolation, Key, Spline};
 
 // iso surface mesh generation
 use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
@@ -25,6 +27,8 @@ use tokio::task;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread::JoinHandle;
+
+use noise::{Fbm, HybridMulti, NoiseFn, Perlin, Seedable, Simplex};
 
 use crate::manager;
 use crate::VoxelChunk;
@@ -75,7 +79,7 @@ impl ThreadedGenerator {
         };
 
         self_.tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(12)
+            .worker_threads(16)
             .enable_all()
             .build()
             .unwrap();
@@ -91,75 +95,55 @@ impl ThreadedGenerator {
         hash: String,
         root_id: InstanceId,
     ) {
-        // set up noise
-        let mut noise = FastNoiseLite::new();
-        // get a 3d noise texture with voxel resolution * 3
-        noise.set_noise_type(NoiseType::TYPE_SIMPLEX);
-        noise.set_frequency(0.005);
-        noise.set_fractal_type(FractalType::FRACTAL_FBM);
-        noise.set_fractal_octaves(4);
-        noise.set_fractal_gain(0.5);
-        noise.set_fractal_lacunarity(2.0);
-        noise.set_seed(seed);
+        let dimensions = [data_resolution, data_resolution * 8, data_resolution];
+        let shape_3d = RuntimeShape::<u32, 3>::new(dimensions);
+        let shape_2d = RuntimeShape::<u32, 2>::new([dimensions[0], dimensions[2]]);
+
+        // Continents
+        let mut cont = Fbm::<SuperSimplex>::new(seed as u32);
+        cont.octaves = 5;
+        cont.frequency = 0.005 as f64;
 
         // // start a timer to check performance of isosurface generation
         // let start = std::time::Instant::now();
 
-        let mut dimensions = [data_resolution, data_resolution * 8, data_resolution];
-        // 4x the height resolution
-        dimensions[1] *= 8;
-        let shape = RuntimeShape::<u32, 3>::new(dimensions);
+        // define generation splines for noise
+        let mut cont_spline = Spline::from_vec(vec![
+            Key::new(-1.0, 40.0, Interpolation::Cosine),
+            Key::new(0.3, 50.0, Interpolation::Cosine),
+            Key::new(0.4, 60.0, Interpolation::Cosine),
+            Key::new(1.0, 70.0, Interpolation::Cosine),
+        ]);
 
         // compute sdf
-        let mut sdf = vec![0.0; shape.usize()];
-        for i in 0u32..shape.size() {
-            let [x, y, z] = shape.delinearize(i);
+        let mut sdf = vec![0.0; shape_3d.usize()];
+        for i in 0u32..shape_3d.size() {
+            let [x, y, z] = shape_3d.delinearize(i);
 
             // add offsets
-            let x = x as f32 + chunk_pos.x;
-            let y = y as f32 + chunk_pos.y;
-            let z = z as f32 + chunk_pos.z;
+            let x = x as f64 + chunk_pos.x as f64;
+            let y = y as f64 + chunk_pos.y as f64;
+            let z = z as f64 + chunk_pos.z as f64;
 
-            // height limit
-            let height_limit = 64.0;
-
-            if y > height_limit {
-                sdf[i as usize] = -1.0;
+            if y > cont_spline
+                .sample(cont.get([x, z]).clamp(-1.0, 1.0))
+                .unwrap()
+            {
+                sdf[i as usize] = -0.5;
                 continue;
             }
 
-            sdf[i as usize] = noise.get_noise_3d(x as f32, y as f32, z as f32);
+            sdf[i as usize] = cont.get([x, y, z]).clamp(-1.0, 1.0) as f32;
         }
 
         let mut buffer: SurfaceNetsBuffer = SurfaceNetsBuffer::default();
         surface_nets(
             &sdf,
-            &shape,
+            &shape_3d,
             [0; 3],
-            [
-                data_resolution - 1,
-                (data_resolution * 4) - 1,
-                data_resolution - 1,
-            ],
+            [dimensions[0] - 1, dimensions[1] - 1, dimensions[2] - 1],
             &mut buffer,
         );
-
-        // // stop timer
-        // let duration = start.elapsed();
-
-        // // print time
-        // godot_print!(
-        //     "[GDVoxel] Isosurface generation took {}ms",
-        //     duration.as_millis()
-        // );
-
-        // // print number of normals, verts, and indices
-        // godot_print!(
-        //     "[GDVoxel] Generated {} normals, {} vertices, and {} indices",
-        //     buffer.normals.len(),
-        //     buffer.positions.len(),
-        //     buffer.indices.len()
-        // );
 
         // if any of the buffers are empty, return
         if buffer.positions.len() == 0 || buffer.indices.len() == 0 {

@@ -46,6 +46,7 @@ pub struct VoxelChunkManager {
 
     queued_chunks: Vec<String>,
     generated_chunks: HashMap<String, i64>,
+    to_remove: Vec<String>,
 
     #[base]
     base: Base<Node3D>,
@@ -158,12 +159,22 @@ impl VoxelChunkManager {
             // if chunk already exists, skip
             if self.generated_chunks.contains_key(&hash) {
                 cur_center_chunk_coord = self.spiral(i);
-                continue;
+
+                // check to make sure the chunk is_instance_valid
+                let chunk_id = self.generated_chunks.get(&hash).unwrap();
+                let chunk: Gd<VoxelChunk> = instance_from_id(*chunk_id).unwrap().cast();
+                // if chunk is not valid, remove it
+                if chunk.is_queued_for_deletion() {
+                    self.generated_chunks.remove(&hash);
+                } else {
+                    continue;
+                }
             }
 
             // if chunk is already queued, skip
             if self.queued_chunks.contains(&hash) {
                 cur_center_chunk_coord = self.spiral(i);
+
                 continue;
             }
 
@@ -185,6 +196,32 @@ impl VoxelChunkManager {
             .as_mut()
             .unwrap()
             .generate_chunk_data(&chunk_positions);
+
+        // // iterate through generated chunks
+        // for chunk_id in self.generated_chunks.clone().values() {
+        //     // get chunk
+        //     let mut chunk: Gd<VoxelChunk> = match instance_from_id(*chunk_id) {
+        //         Some(chunk) => chunk.cast(),
+        //         None => {
+        //             self.generated_chunks.remove(&chunk_id.to_string());
+        //             continue;
+        //         }
+        //     };
+        //     // get chunk pos
+        //     let chunk_pos = chunk.get_position();
+
+        //     // if it's too far away from player, queue it for removal
+        //     let player_pos_xz = Vector3::new(self.player_pos.x, 0.0, self.player_pos.z);
+        //     if chunk_pos.distance_to(player_pos_xz)
+        //         > self.spiral(self.render_distance).distance_to(player_pos_xz)
+        //     {
+        //         // print
+        //         godot_print!(
+        //             "[GDVoxel - Chunk Generator] Chunk too far away, queueing for removal"
+        //         );
+        //         chunk.call_deferred("queue_free".into(), &[]);
+        //     }
+        // }
     }
 }
 
