@@ -18,7 +18,3 @@ config/icon="res://icon.svg"
 [autoload]
 
 DebugDraw="*res://debug_draw.gd"
-
-[rendering]
-
-driver/threads/thread_model=2

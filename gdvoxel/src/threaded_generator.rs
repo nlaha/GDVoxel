@@ -75,7 +75,7 @@ impl ThreadedGenerator {
         };
 
         self_.tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(8)
+            .worker_threads(12)
             .enable_all()
             .build()
             .unwrap();
@@ -85,21 +85,12 @@ impl ThreadedGenerator {
 
     async fn generation_future(
         chunk_pos: Vector3,
-        cache: Arc<moka::sync::Cache<String, ChunkData>>,
         voxel_size: f32,
         data_resolution: u32,
         seed: i32,
         hash: String,
         root_id: InstanceId,
     ) {
-        // add blank (lock) entry to cache
-        cache.insert(
-            hash.clone(),
-            ChunkData {
-                buffer: SurfaceNetsBuffer::default(),
-            },
-        );
-
         // set up noise
         let mut noise = FastNoiseLite::new();
         // get a 3d noise texture with voxel resolution * 3
@@ -111,11 +102,12 @@ impl ThreadedGenerator {
         noise.set_fractal_lacunarity(2.0);
         noise.set_seed(seed);
 
-        // start a timer to check performance of isosurface generation
-        let start = std::time::Instant::now();
+        // // start a timer to check performance of isosurface generation
+        // let start = std::time::Instant::now();
 
-        // A 16^3 chunk with 1-voxel boundary padding.
-        let dimensions = [data_resolution; 3];
+        let mut dimensions = [data_resolution, data_resolution * 8, data_resolution];
+        // 4x the height resolution
+        dimensions[1] *= 8;
         let shape = RuntimeShape::<u32, 3>::new(dimensions);
 
         // compute sdf
@@ -128,28 +120,46 @@ impl ThreadedGenerator {
             let y = y as f32 + chunk_pos.y;
             let z = z as f32 + chunk_pos.z;
 
+            // height limit
+            let height_limit = 64.0;
+
+            if y > height_limit {
+                sdf[i as usize] = -1.0;
+                continue;
+            }
+
             sdf[i as usize] = noise.get_noise_3d(x as f32, y as f32, z as f32);
         }
 
         let mut buffer: SurfaceNetsBuffer = SurfaceNetsBuffer::default();
-        surface_nets(&sdf, &shape, [0; 3], [data_resolution - 1; 3], &mut buffer);
-
-        // stop timer
-        let duration = start.elapsed();
-
-        // print time
-        godot_print!(
-            "[GDVoxel] Isosurface generation took {}ms",
-            duration.as_millis()
+        surface_nets(
+            &sdf,
+            &shape,
+            [0; 3],
+            [
+                data_resolution - 1,
+                (data_resolution * 4) - 1,
+                data_resolution - 1,
+            ],
+            &mut buffer,
         );
 
-        // print number of normals, verts, and indices
-        godot_print!(
-            "[GDVoxel] Generated {} normals, {} vertices, and {} indices",
-            buffer.normals.len(),
-            buffer.positions.len(),
-            buffer.indices.len()
-        );
+        // // stop timer
+        // let duration = start.elapsed();
+
+        // // print time
+        // godot_print!(
+        //     "[GDVoxel] Isosurface generation took {}ms",
+        //     duration.as_millis()
+        // );
+
+        // // print number of normals, verts, and indices
+        // godot_print!(
+        //     "[GDVoxel] Generated {} normals, {} vertices, and {} indices",
+        //     buffer.normals.len(),
+        //     buffer.positions.len(),
+        //     buffer.indices.len()
+        // );
 
         // if any of the buffers are empty, return
         if buffer.positions.len() == 0 || buffer.indices.len() == 0 {
@@ -171,9 +181,9 @@ impl ThreadedGenerator {
             gd_positions.set(
                 i as usize,
                 Vector3 {
-                    x: buffer.positions[i][0] * voxel_size,
-                    y: buffer.positions[i][1] * voxel_size,
-                    z: buffer.positions[i][2] * voxel_size,
+                    x: buffer.positions[i][0],
+                    y: buffer.positions[i][1],
+                    z: buffer.positions[i][2],
                 },
             );
         }
@@ -235,12 +245,11 @@ impl ThreadedGenerator {
         chunk.set_name(hash.clone().into());
 
         chunk.set_position(chunk_pos);
+        chunk.set_scale(Vector3::new(voxel_size, voxel_size, voxel_size));
 
         chunk.set_mesh(mesh.upcast());
 
         chunk.call_deferred("add_to_tree".into(), &[root_id.to_variant()]);
-
-        cache.insert(hash, ChunkData { buffer: buffer });
     }
 
     pub fn generate_chunk_data(&mut self, positions: &Vec<Vector3>) -> Vec<Option<ChunkData>> {
@@ -254,20 +263,15 @@ impl ThreadedGenerator {
                 return;
             }
 
-            let thread = {
-                let cache: Arc<moka::sync::Cache<String, ChunkData>> = Arc::clone(&self.cache);
-
-                self.tokio_runtime
-                    .spawn(ThreadedGenerator::generation_future(
-                        *chunk_pos,
-                        cache,
-                        self.voxel_size,
-                        self.data_resolution,
-                        self.seed,
-                        hash,
-                        self.root_id,
-                    ))
-            };
+            self.tokio_runtime
+                .spawn(ThreadedGenerator::generation_future(
+                    *chunk_pos,
+                    self.voxel_size,
+                    self.data_resolution,
+                    self.seed,
+                    hash,
+                    self.root_id,
+                ));
         });
 
         // get data from cache

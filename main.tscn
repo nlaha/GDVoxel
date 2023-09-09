@@ -23,7 +23,7 @@ volumetric_fog_ambient_inject = 1.51
 [node name="Scene" type="Node3D"]
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3.25201)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 64, 0)
 script = ExtResource("2_nvty6")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
@@ -35,5 +35,7 @@ shadow_enabled = true
 
 [node name="VoxelChunkManager" type="VoxelChunkManager" parent="."]
 chunk_scene = "C:/Users/nlaha/Desktop/Code/GDVoxel/voxel_chunk.tscn"
-render_distance = 32
+data_resolution = 64
+seed = 14
+render_distance = 128
 unique_name_in_owner = true
