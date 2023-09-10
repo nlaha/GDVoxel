@@ -46,7 +46,6 @@ pub struct VoxelChunkManager {
 
     queued_chunks: Vec<String>,
     generated_chunks: HashMap<String, i64>,
-    to_remove: Vec<String>,
 
     #[base]
     base: Base<Node3D>,
@@ -66,11 +65,11 @@ impl VoxelChunkManager {
     /// quantize player position to chunk position, chunk position is a grid
     /// with cell size data_resolution * voxel_size
     #[func]
-    pub fn quantize_player_pos(&self) -> Vector3 {
+    pub fn quantize_pos(&self, vec: Vector3) -> Vector3 {
         return Vector3::new(
-            (self.player_pos.x / (self.data_resolution as f32 * self.voxel_size)).floor(),
-            (self.player_pos.y / (self.data_resolution as f32 * self.voxel_size)).floor(),
-            (self.player_pos.z / (self.data_resolution as f32 * self.voxel_size)).floor(),
+            (vec.x / (self.data_resolution as f32 * self.voxel_size)).floor(),
+            0.0,
+            (vec.z / (self.data_resolution as f32 * self.voxel_size)).floor(),
         );
     }
 
@@ -98,92 +97,66 @@ impl VoxelChunkManager {
         return hash_string;
     }
 
-    /// spirals outward by index amount from the current quantized player position
-    /// this is used to generate chunks in a spiral pattern
-    #[func]
-    pub fn spiral(&self, index: i32) -> Vector3 {
-        // get the current quantized player position
-        let cur_center_chunk_coord = self.quantize_player_pos();
-
-        let r = ((f64::sqrt(index as f64 + 1.0) - 1.0) / 2.0).floor() as i32 + 1;
-        let p = (8 * r * (r - 1)) / 2;
-        let en = r * 2;
-        let a = (1 + index - p) % (r * 8);
-        let mut pos: Vector3 = Vector3::new(0.0, 0.0, 0.0);
-
-        match a / (r * 2) {
-            0 => {
-                pos.x = (a - r) as f32;
-                pos.z = (-r) as f32;
-            }
-            1 => {
-                pos.x = r as f32;
-                pos.z = (a % en - r) as f32;
-            }
-            2 => {
-                pos.x = (r - a % en) as f32;
-                pos.z = r as f32;
-            }
-            3 => {
-                pos.x = (-r) as f32;
-                pos.z = (r - a % en) as f32;
-            }
-            _ => {}
-        }
-
-        // return the current spiral offset + the current quantized player position
-        return cur_center_chunk_coord + pos;
-    }
-
     #[func]
     fn update_chunks(&mut self) {
         // we have several things to set up in the ready function, one of which is
         // the thread that will spawn the chunks and run generation on them
 
-        let mut cur_center_chunk_coord = self.quantize_player_pos();
+        let cur_center_chunk_coord = self.quantize_pos(self.player_pos);
 
-        let mut chunk_positions = Vec::new();
+        let mut priority_queue: PriorityQueue<[i32; 3], i32> = PriorityQueue::new();
 
-        // generate chunk positions
-        for i in 0..self.render_distance {
-            // init chunk position
-            let new_pos = Vector3::new(
-                cur_center_chunk_coord.x * (self.data_resolution - 2) as f32 * self.voxel_size,
-                0.0,
-                cur_center_chunk_coord.z * (self.data_resolution - 2) as f32 * self.voxel_size,
-            );
+        for x in -self.render_distance..self.render_distance {
+            for z in -self.render_distance..self.render_distance {
+                let new_pos = Vector3::new(
+                    ((x + cur_center_chunk_coord.x as i32) as f32
+                        * (self.data_resolution as i32 - 2) as f32
+                        * self.voxel_size),
+                    0.0,
+                    ((z + cur_center_chunk_coord.z as i32) as f32
+                        * (self.data_resolution as i32 - 2) as f32
+                        * self.voxel_size),
+                );
 
-            // create hash
-            let hash = VoxelChunkManager::hash_chunk_pos(cur_center_chunk_coord);
+                let hash = VoxelChunkManager::hash_chunk_pos(new_pos);
 
-            // if chunk already exists, skip
-            if self.generated_chunks.contains_key(&hash) {
-                cur_center_chunk_coord = self.spiral(i);
+                // if chunk already exists, skip
+                if self.generated_chunks.contains_key(&hash) {
+                    // check to make sure the chunk is_instance_valid
+                    let chunk_id = self.generated_chunks.get(&hash).unwrap();
+                    let chunk: Gd<VoxelChunk> = instance_from_id(*chunk_id).unwrap().cast();
+                    // if chunk is not valid, remove it
+                    if chunk.is_queued_for_deletion() {
+                        self.generated_chunks.remove(&hash);
+                    } else {
+                        continue;
+                    }
+                }
 
-                // check to make sure the chunk is_instance_valid
-                let chunk_id = self.generated_chunks.get(&hash).unwrap();
-                let chunk: Gd<VoxelChunk> = instance_from_id(*chunk_id).unwrap().cast();
-                // if chunk is not valid, remove it
-                if chunk.is_queued_for_deletion() {
-                    self.generated_chunks.remove(&hash);
-                } else {
+                // if chunk is already queued, skip
+                if self.queued_chunks.contains(&hash) {
                     continue;
                 }
+
+                let priority = new_pos.distance_to(cur_center_chunk_coord);
+                priority_queue.push(
+                    [new_pos.x as i32, new_pos.y as i32, new_pos.z as i32],
+                    priority as i32,
+                );
+                self.queued_chunks.push(hash);
             }
-
-            // if chunk is already queued, skip
-            if self.queued_chunks.contains(&hash) {
-                cur_center_chunk_coord = self.spiral(i);
-
-                continue;
-            }
-
-            chunk_positions.push(new_pos);
-            self.queued_chunks.push(hash);
-
-            // increment chunk coordinate
-            cur_center_chunk_coord = self.spiral(i);
         }
+
+        let chunk_positions: Vec<Vector3> = priority_queue
+            .into_sorted_vec()
+            .iter()
+            .rev()
+            .map(|pos| {
+                // get vector from array
+                let chunk_pos = Vector3::new(pos[0] as f32, pos[1] as f32, pos[2] as f32);
+                return chunk_pos;
+            })
+            .collect();
 
         godot_print!(
             "[GDVoxel - Chunk Generator] Generating chunks, {} new chunks queued, {} chunks generated",
@@ -197,31 +170,39 @@ impl VoxelChunkManager {
             .unwrap()
             .generate_chunk_data(&chunk_positions);
 
-        // // iterate through generated chunks
-        // for chunk_id in self.generated_chunks.clone().values() {
-        //     // get chunk
-        //     let mut chunk: Gd<VoxelChunk> = match instance_from_id(*chunk_id) {
-        //         Some(chunk) => chunk.cast(),
-        //         None => {
-        //             self.generated_chunks.remove(&chunk_id.to_string());
-        //             continue;
-        //         }
-        //     };
-        //     // get chunk pos
-        //     let chunk_pos = chunk.get_position();
+        // iterate through generated chunks
+        for (hash, chunk_id) in self.generated_chunks.clone().iter() {
+            // make sure it's not in the queue
+            if self.queued_chunks.contains(hash) {
+                continue;
+            }
 
-        //     // if it's too far away from player, queue it for removal
-        //     let player_pos_xz = Vector3::new(self.player_pos.x, 0.0, self.player_pos.z);
-        //     if chunk_pos.distance_to(player_pos_xz)
-        //         > self.spiral(self.render_distance).distance_to(player_pos_xz)
-        //     {
-        //         // print
-        //         godot_print!(
-        //             "[GDVoxel - Chunk Generator] Chunk too far away, queueing for removal"
-        //         );
-        //         chunk.call_deferred("queue_free".into(), &[]);
-        //     }
-        // }
+            // get chunk
+            let mut chunk: Gd<VoxelChunk> = match instance_from_id(*chunk_id) {
+                Some(chunk) => chunk.cast(),
+                None => {
+                    self.generated_chunks.remove(&chunk_id.to_string());
+                    continue;
+                }
+            };
+            // get chunk pos
+            let mut chunk_pos = chunk.get_position();
+            chunk_pos.y = 0.0;
+
+            // if it's too far away from player, queue it for removal
+            if chunk_pos
+                .distance_to(cur_center_chunk_coord * self.voxel_size * self.data_resolution as f32)
+                > (self.render_distance * self.data_resolution as i32) as f32 * 2.0
+            {
+                // print
+                godot_print!(
+                    "[GDVoxel - Chunk Generator] Chunk too far away, queueing for removal"
+                );
+                chunk.call_deferred("queue_free".into(), &[]);
+                // remove from generated chunks
+                self.generated_chunks.remove(hash);
+            }
+        }
     }
 }
 

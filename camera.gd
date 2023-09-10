@@ -62,7 +62,8 @@ func _input(event):
 func _process(delta):
 	_update_mouselook()
 	_update_movement(delta)
-
+	%VoxelChunkManager.update_player_position(self.position)
+		
 # Updates camera movement
 func _update_movement(delta):
 	# Computes desired direction from key states
@@ -91,7 +92,6 @@ func _update_movement(delta):
 		_velocity.z = clamp(_velocity.z + offset.z, -_vel_multiplier, _vel_multiplier)
 	
 		translate(_velocity * delta * speed_multi)
-		%VoxelChunkManager.update_player_position(self.position)
 
 # Updates mouse look 
 func _update_mouselook():

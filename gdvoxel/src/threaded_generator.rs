@@ -95,7 +95,7 @@ impl ThreadedGenerator {
         hash: String,
         root_id: InstanceId,
     ) {
-        let dimensions = [data_resolution, data_resolution * 8, data_resolution];
+        let dimensions = [data_resolution, data_resolution * 6, data_resolution];
         let shape_3d = RuntimeShape::<u32, 3>::new(dimensions);
         let shape_2d = RuntimeShape::<u32, 2>::new([dimensions[0], dimensions[2]]);
 
@@ -104,15 +104,18 @@ impl ThreadedGenerator {
         cont.octaves = 5;
         cont.frequency = 0.005 as f64;
 
+        // Bedrock
+        let mut brock = SuperSimplex::new(seed as u32);
+
         // // start a timer to check performance of isosurface generation
         // let start = std::time::Instant::now();
 
         // define generation splines for noise
         let mut cont_spline = Spline::from_vec(vec![
-            Key::new(-1.0, 40.0, Interpolation::Cosine),
-            Key::new(0.3, 50.0, Interpolation::Cosine),
-            Key::new(0.4, 60.0, Interpolation::Cosine),
-            Key::new(1.0, 70.0, Interpolation::Cosine),
+            Key::new(-1.0, 10.0, Interpolation::Linear),
+            Key::new(0.3, 30.0, Interpolation::Cosine),
+            Key::new(0.4, 35.0, Interpolation::Cosine),
+            Key::new(1.0, 50.0, Interpolation::Linear),
         ]);
 
         // compute sdf
@@ -123,13 +126,18 @@ impl ThreadedGenerator {
             // add offsets
             let x = x as f64 + chunk_pos.x as f64;
             let y = y as f64 + chunk_pos.y as f64;
-            let z = z as f64 + chunk_pos.z as f64;
+            let z: f64 = z as f64 + chunk_pos.z as f64;
 
             if y > cont_spline
-                .sample(cont.get([x, z]).clamp(-1.0, 1.0))
+                .clamped_sample(cont.get([x, z]).clamp(-1.0, 1.0))
                 .unwrap()
             {
                 sdf[i as usize] = -0.5;
+                continue;
+            }
+
+            if y < cont.get([x * 2.0 + 1000.0, z * 2.0 + 1000.0]) + 1.0 * 10.0 {
+                sdf[i as usize] = 1.0;
                 continue;
             }
 
