@@ -164,8 +164,7 @@ impl VoxelChunkManager {
             self.generated_chunks.len()
         );
         // generate chunk data
-        let buffers = self
-            .threaded_generator
+        self.threaded_generator
             .as_mut()
             .unwrap()
             .generate_chunk_data(&chunk_positions);

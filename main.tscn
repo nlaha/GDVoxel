@@ -37,9 +37,8 @@ shadow_enabled = true
 
 [node name="VoxelChunkManager" type="VoxelChunkManager" parent="."]
 chunk_scene = "C:/Users/nlaha/Desktop/Code/GDVoxel/voxel_chunk.tscn"
-data_resolution = 16
 seed = 14
-render_distance = 16
+render_distance = 1
 unique_name_in_owner = true
 
 [node name="FreeLookCamera" type="Camera3D" parent="."]

@@ -30,6 +30,7 @@ use std::thread::JoinHandle;
 
 use noise::{Fbm, HybridMulti, NoiseFn, Perlin, Seedable, Simplex};
 
+use crate::execute_gpu;
 use crate::manager;
 use crate::VoxelChunk;
 
@@ -95,53 +96,71 @@ impl ThreadedGenerator {
         hash: String,
         root_id: InstanceId,
     ) {
-        let dimensions = [data_resolution, data_resolution * 6, data_resolution];
-        let shape_3d = RuntimeShape::<u32, 3>::new(dimensions);
-        let shape_2d = RuntimeShape::<u32, 2>::new([dimensions[0], dimensions[2]]);
+        let dimensions = [data_resolution, data_resolution, data_resolution];
+        let shape_3d: RuntimeShape<u32, 3> = RuntimeShape::<u32, 3>::new(dimensions);
+        let shape_3d_gpu: RuntimeShape<u32, 3> = RuntimeShape::<u32, 3>::new([256, 256, 256]);
 
-        // Continents
-        let mut cont = Fbm::<SuperSimplex>::new(seed as u32);
-        cont.octaves = 5;
-        cont.frequency = 0.005 as f64;
-
-        // Bedrock
-        let mut brock = SuperSimplex::new(seed as u32);
+        // // Continents
+        // let mut cont = Fbm::<SuperSimplex>::new(seed as u32);
+        // cont.octaves = 5;
+        // cont.frequency = 0.005 as f64;
 
         // // start a timer to check performance of isosurface generation
         // let start = std::time::Instant::now();
 
-        // define generation splines for noise
-        let mut cont_spline = Spline::from_vec(vec![
-            Key::new(-1.0, 10.0, Interpolation::Linear),
-            Key::new(0.3, 30.0, Interpolation::Cosine),
-            Key::new(0.4, 35.0, Interpolation::Cosine),
-            Key::new(1.0, 50.0, Interpolation::Linear),
-        ]);
+        // // define generation splines for noise
+        // let mut cont_spline = Spline::from_vec(vec![
+        //     Key::new(-1.0, 10.0, Interpolation::Linear),
+        //     Key::new(0.3, 30.0, Interpolation::Cosine),
+        //     Key::new(0.4, 35.0, Interpolation::Cosine),
+        //     Key::new(1.0, 50.0, Interpolation::Linear),
+        // ]);
+
+        let compute_result = execute_gpu(shape_3d_gpu.clone(), &chunk_pos, shape_3d.as_array()[0])
+            .await
+            .unwrap();
+
+        // print out length of resulting buffer
+        godot_print!(
+            "[GDVoxel - Compute] Generated size: {:?}",
+            compute_result.len()
+        );
 
         // compute sdf
         let mut sdf = vec![0.0; shape_3d.usize()];
         for i in 0u32..shape_3d.size() {
+            //let [x, y, z] = shape_3d_gpu.delinearize(i);
+
+            // // add offsets
+            // let x = x as f64 + chunk_pos.x as f64;
+            // let y = y as f64 + chunk_pos.y as f64;
+            // let z: f64 = z as f64 + chunk_pos.z as f64;
+
+            // // let surface_height = cont_spline
+            // //     .clamped_sample(cont.get([x, z]).clamp(-1.0, 1.0))
+            // //     .unwrap();
+            // // if y > surface_height {
+            // //     sdf[i as usize] = -1.0 * (((surface_height) / 50.0) as f32).clamp(-1.0, 1.0);
+            // //     continue;
+            // // }
+
+            // let mut density_offset = (cont_spline
+            //     .clamped_sample(cont.get([x + 1000.0, z + 1000.0]))
+            //     .unwrap_or(50.0)
+            //     - y)
+            //     .clamp(-1.0, 0.0);
+
+            // if y < cont.get([x * 2.0 - 1000.0, z * 2.0 - 1000.0]) + 1.0 * 10.0 {
+            //     density_offset += 1.0;
+            // }
+
+            // linearize for compute_result which is larger than shape_3d
             let [x, y, z] = shape_3d.delinearize(i);
 
-            // add offsets
-            let x = x as f64 + chunk_pos.x as f64;
-            let y = y as f64 + chunk_pos.y as f64;
-            let z: f64 = z as f64 + chunk_pos.z as f64;
+            let compute_idx = shape_3d_gpu.linearize([x, y, z]);
 
-            if y > cont_spline
-                .clamped_sample(cont.get([x, z]).clamp(-1.0, 1.0))
-                .unwrap()
-            {
-                sdf[i as usize] = -0.5;
-                continue;
-            }
-
-            if y < cont.get([x * 2.0 + 1000.0, z * 2.0 + 1000.0]) + 1.0 * 10.0 {
-                sdf[i as usize] = 1.0;
-                continue;
-            }
-
-            sdf[i as usize] = cont.get([x, y, z]).clamp(-1.0, 1.0) as f32;
+            //sdf[i as usize] = (cont.get([x, y, z]) + density_offset).clamp(-1.0, 1.0) as f32;
+            sdf[i as usize] = compute_result[compute_idx as usize];
         }
 
         let mut buffer: SurfaceNetsBuffer = SurfaceNetsBuffer::default();
@@ -149,7 +168,11 @@ impl ThreadedGenerator {
             &sdf,
             &shape_3d,
             [0; 3],
-            [dimensions[0] - 1, dimensions[1] - 1, dimensions[2] - 1],
+            [
+                shape_3d.as_array()[0] - 1,
+                shape_3d.as_array()[1] - 1,
+                shape_3d.as_array()[2] - 1,
+            ],
             &mut buffer,
         );
 
@@ -217,21 +240,15 @@ impl ThreadedGenerator {
             gd_indices.to_variant(),
         );
 
-        // set arrays
-        let mut mesh = ArrayMesh::new();
-        mesh.call_deferred(
-            "add_surface_from_arrays".into(),
-            &[
-                PrimitiveType::PRIMITIVE_TRIANGLES.to_variant(),
-                arrays.to_variant(),
-            ],
-        );
-
         // a chunk has been requested for this position, so we might as well spawn one in right now
         let chunk_scene: Gd<PackedScene> = load("res://voxel_chunk.tscn");
 
         // create a new chunk
         let mut chunk: Gd<VoxelChunk> = chunk_scene.instantiate_as();
+
+        // set arrays
+        let mut mesh = ArrayMesh::new();
+        mesh.add_surface_from_arrays(PrimitiveType::PRIMITIVE_TRIANGLES, arrays);
 
         // set the name
         chunk.set_name(hash.clone().into());
@@ -244,16 +261,11 @@ impl ThreadedGenerator {
         chunk.call_deferred("add_to_tree".into(), &[root_id.to_variant()]);
     }
 
-    pub fn generate_chunk_data(&mut self, positions: &Vec<Vector3>) -> Vec<Option<ChunkData>> {
+    pub fn generate_chunk_data(&mut self, positions: &Vec<Vector3>) {
         // install all chunk positions into the thread pool
 
         positions.iter().for_each(|chunk_pos| {
             let hash: String = manager::VoxelChunkManager::hash_chunk_pos(*chunk_pos);
-
-            // skip if already in cache
-            if self.cache.contains_key(&hash) {
-                return;
-            }
 
             self.tokio_runtime
                 .spawn(ThreadedGenerator::generation_future(
@@ -265,25 +277,5 @@ impl ThreadedGenerator {
                     self.root_id,
                 ));
         });
-
-        // get data from cache
-        // first, hash the chunk positions
-        return positions
-            .iter()
-            .map(|pos| {
-                let hash = manager::VoxelChunkManager::hash_chunk_pos(*pos);
-
-                match self.cache.get(&hash) {
-                    Some(data) => {
-                        // return the data
-                        return Some(data);
-                    }
-                    None => {
-                        // return none
-                        return None;
-                    }
-                }
-            })
-            .collect();
     }
 }
