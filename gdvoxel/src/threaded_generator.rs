@@ -1,34 +1,19 @@
 // godot imports
-use godot::builtin::Array;
-use godot::engine::fast_noise_lite::FractalType;
-use godot::engine::fast_noise_lite::NoiseType;
 use godot::engine::mesh::ArrayType;
 use godot::engine::mesh::PrimitiveType;
 use godot::engine::ArrayMesh;
-use godot::engine::FastNoiseLite;
-use godot::engine::Mesh;
-use godot::engine::MeshInstance3D;
-use godot::engine::MeshInstance3DVirtual;
-use godot::engine::Node3D;
 use godot::prelude::*;
 
-use noise::SuperSimplex;
-use rand::prelude::*;
-use splines::{Interpolation, Key, Spline};
+use async_recursion::async_recursion;
 
 // iso surface mesh generation
 use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use ndshape::RuntimeShape;
 use ndshape::Shape;
-use ndshape::{ConstShape, ConstShape3u32};
 
 use tokio::task;
 
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread::JoinHandle;
-
-use noise::{Fbm, HybridMulti, NoiseFn, Perlin, Seedable, Simplex};
 
 use crate::execute_gpu;
 use crate::manager;
@@ -55,7 +40,6 @@ impl Clone for ChunkData {
 }
 
 pub struct ThreadedGenerator {
-    cache: Arc<moka::sync::Cache<String, ChunkData>>,
     voxel_size: f32,
     data_resolution: u32,
     seed: i32,
@@ -71,7 +55,6 @@ impl ThreadedGenerator {
         root_id: InstanceId,
     ) -> ThreadedGenerator {
         let mut self_ = ThreadedGenerator {
-            cache: Arc::new(moka::sync::Cache::new(100)),
             voxel_size: voxel_size,
             data_resolution: data_resolution,
             seed: seed,
@@ -88,6 +71,7 @@ impl ThreadedGenerator {
         return self_;
     }
 
+    #[async_recursion]
     async fn generation_future(
         chunk_pos: Vector3,
         voxel_size: f32,
@@ -96,7 +80,7 @@ impl ThreadedGenerator {
         hash: String,
         root_id: InstanceId,
     ) {
-        let dimensions = [data_resolution, data_resolution, data_resolution];
+        let dimensions = [data_resolution, data_resolution * 2, data_resolution];
         let shape_3d: RuntimeShape<u32, 3> = RuntimeShape::<u32, 3>::new(dimensions);
         let shape_3d_gpu: RuntimeShape<u32, 3> = RuntimeShape::<u32, 3>::new([256, 256, 256]);
 
@@ -116,7 +100,7 @@ impl ThreadedGenerator {
         //     Key::new(1.0, 50.0, Interpolation::Linear),
         // ]);
 
-        let compute_result = execute_gpu(shape_3d_gpu.clone(), &chunk_pos, shape_3d.as_array()[0])
+        let compute_result = execute_gpu(shape_3d_gpu.clone(), chunk_pos, shape_3d.clone())
             .await
             .unwrap();
 
@@ -129,31 +113,6 @@ impl ThreadedGenerator {
         // compute sdf
         let mut sdf = vec![0.0; shape_3d.usize()];
         for i in 0u32..shape_3d.size() {
-            //let [x, y, z] = shape_3d_gpu.delinearize(i);
-
-            // // add offsets
-            // let x = x as f64 + chunk_pos.x as f64;
-            // let y = y as f64 + chunk_pos.y as f64;
-            // let z: f64 = z as f64 + chunk_pos.z as f64;
-
-            // // let surface_height = cont_spline
-            // //     .clamped_sample(cont.get([x, z]).clamp(-1.0, 1.0))
-            // //     .unwrap();
-            // // if y > surface_height {
-            // //     sdf[i as usize] = -1.0 * (((surface_height) / 50.0) as f32).clamp(-1.0, 1.0);
-            // //     continue;
-            // // }
-
-            // let mut density_offset = (cont_spline
-            //     .clamped_sample(cont.get([x + 1000.0, z + 1000.0]))
-            //     .unwrap_or(50.0)
-            //     - y)
-            //     .clamp(-1.0, 0.0);
-
-            // if y < cont.get([x * 2.0 - 1000.0, z * 2.0 - 1000.0]) + 1.0 * 10.0 {
-            //     density_offset += 1.0;
-            // }
-
             // linearize for compute_result which is larger than shape_3d
             let [x, y, z] = shape_3d.delinearize(i);
 
@@ -176,9 +135,18 @@ impl ThreadedGenerator {
             &mut buffer,
         );
 
-        // if any of the buffers are empty, return
+        // if any of the buffers are empty, try again
+        // TODO: this is scary and dangerous, I don't like it
         if buffer.positions.len() == 0 || buffer.indices.len() == 0 {
-            return;
+            Self::generation_future(
+                chunk_pos,
+                voxel_size,
+                data_resolution,
+                seed,
+                hash.clone(),
+                root_id,
+            )
+            .await;
         }
 
         // load into godot arrays

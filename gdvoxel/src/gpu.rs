@@ -8,8 +8,8 @@ use wgpu::util::DeviceExt;
 
 pub async fn execute_gpu(
     shape_3d: RuntimeShape<u32, 3>,
-    offsets: &Vector3,
-    size_limit: u32,
+    offsets: Vector3,
+    generated_size: RuntimeShape<u32, 3>,
 ) -> Option<Vec<f32>> {
     // Instantiates instance of WebGPU
     let instance = wgpu::Instance::default();
@@ -39,15 +39,15 @@ pub async fn execute_gpu(
         return None;
     }
 
-    execute_gpu_inner(&device, &queue, shape_3d, offsets, size_limit).await
+    execute_gpu_inner(&device, &queue, shape_3d, offsets, generated_size).await
 }
 
 async fn execute_gpu_inner(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     shape_3d: RuntimeShape<u32, 3>,
-    offsets: &Vector3,
-    size_limit: u32,
+    offsets: Vector3,
+    generated_size: RuntimeShape<u32, 3>,
 ) -> Option<Vec<f32>> {
     // Loads the shader from WGSL
     let cs_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -127,14 +127,16 @@ async fn execute_gpu_inner(
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("Terrain noise settings"),
                         contents: bytemuck::cast_slice(&[
-                            0.05f32,
+                            0.01f32,
                             ((offsets.x as f32 / shape_3d.as_array()[0] as f32)
-                                * (shape_3d.as_array()[0] as f32 * 0.05) as f32),
+                                * (shape_3d.as_array()[0] as f32 * 0.01) as f32),
                             ((offsets.y as f32 / shape_3d.as_array()[1] as f32)
-                                * (shape_3d.as_array()[1] as f32 * 0.05) as f32),
+                                * (shape_3d.as_array()[1] as f32 * 0.01) as f32),
                             ((offsets.z as f32 / shape_3d.as_array()[2] as f32)
-                                * (shape_3d.as_array()[2] as f32 * 0.05) as f32),
-                            size_limit as f32,
+                                * (shape_3d.as_array()[2] as f32 * 0.01) as f32),
+                            generated_size.as_array()[0] as f32,
+                            generated_size.as_array()[1] as f32,
+                            generated_size.as_array()[2] as f32,
                         ]),
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     })

@@ -37,10 +37,10 @@ shadow_enabled = true
 
 [node name="VoxelChunkManager" type="VoxelChunkManager" parent="."]
 chunk_scene = "C:/Users/nlaha/Desktop/Code/GDVoxel/voxel_chunk.tscn"
+data_resolution = 128
 seed = 14
-render_distance = 1
 unique_name_in_owner = true
 
 [node name="FreeLookCamera" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 64, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 256, 0)
 script = ExtResource("2_gp0tb")
