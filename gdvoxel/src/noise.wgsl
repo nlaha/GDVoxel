@@ -107,9 +107,9 @@ fn cubic_interpolation(points: array<vec2<f32>, 4>, x: f32) -> f32 {
 }
 
 const SURFACE_SPLINE = array<vec2<f32>, 4>(
-    vec2<f32>(-1.0, 10.0),
+    vec2<f32>(-1.0, 0.0),
     vec2<f32>(0.3, 40.0),
-    vec2<f32>(0.4, 45.0),
+    vec2<f32>(0.4, 55.0),
     vec2<f32>(1.0, 60.0)
 );
 
