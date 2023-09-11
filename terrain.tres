@@ -1,27 +1,18 @@
-[gd_resource type="ShaderMaterial" load_steps=6 format=3 uid="uid://cm6oahql7wdqw"]
+[gd_resource type="ShaderMaterial" load_steps=5 format=3 uid="uid://cm6oahql7wdqw"]
 
 [ext_resource type="Shader" path="res://terrain.gdshader" id="1_ymxdd"]
-[ext_resource type="Texture2D" uid="uid://1qserdjqibsk" path="res://Stylized_Dry_Mud_001_SD/Stylized_Dry_Mud_001_basecolor.jpg" id="2_lj85i"]
-[ext_resource type="Texture2D" uid="uid://dgy0jde0hhr28" path="res://Stylized_Grass_003_SD/Stylized_Grass_003_normal.jpg" id="3_1ohxo"]
-[ext_resource type="Texture2D" uid="uid://bmb7qe04vrkv5" path="res://Stylized_Grass_003_SD/Stylized_Grass_003_basecolor.jpg" id="4_l8mjw"]
-[ext_resource type="Texture2D" uid="uid://d0utta6wa65b0" path="res://Stylized_Dry_Mud_001_SD/Stylized_Dry_Mud_001_normal.jpg" id="5_tfh8t"]
+
+[sub_resource type="Gradient" id="Gradient_ywioc"]
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_fd3ow"]
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_5jkcx"]
+color_ramp = SubResource("Gradient_ywioc")
+noise = SubResource("FastNoiseLite_fd3ow")
 
 [resource]
 render_priority = 0
 shader = ExtResource("1_ymxdd")
-shader_parameter/metallic = 0.0
-shader_parameter/roughness = 1.0
-shader_parameter/light_affect = 0.0
-shader_parameter/uv1_blend_sharpness = null
-shader_parameter/uv1_scale = Vector3(1, 1, 1)
-shader_parameter/uv1_offset = null
-shader_parameter/uv2_scale = Vector3(1, 1, 1)
-shader_parameter/uv2_offset = null
-shader_parameter/sides_smoothing = 0.25
-shader_parameter/top_smoothing = 0.35
-shader_parameter/g_fallOffContrast = 0.6
-shader_parameter/g_exp = 7.0
-shader_parameter/top_base_color = ExtResource("4_l8mjw")
-shader_parameter/top_normal_map = ExtResource("5_tfh8t")
-shader_parameter/side_base_color = ExtResource("2_lj85i")
-shader_parameter/side_normal_map = ExtResource("3_1ohxo")
+shader_parameter/texture_scale = null
+shader_parameter/texture_blend = null
+shader_parameter/texture_albedo = SubResource("NoiseTexture2D_5jkcx")

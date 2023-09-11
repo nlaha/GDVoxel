@@ -79,6 +79,7 @@ impl ThreadedGenerator {
         seed: i32,
         hash: String,
         root_id: InstanceId,
+        tries: u32,
     ) {
         let dimensions = [data_resolution, data_resolution * 2, data_resolution];
         let shape_3d: RuntimeShape<u32, 3> = RuntimeShape::<u32, 3>::new(dimensions);
@@ -138,15 +139,21 @@ impl ThreadedGenerator {
         // if any of the buffers are empty, try again
         // TODO: this is scary and dangerous, I don't like it
         if buffer.positions.len() == 0 || buffer.indices.len() == 0 {
-            Self::generation_future(
-                chunk_pos,
-                voxel_size,
-                data_resolution,
-                seed,
-                hash.clone(),
-                root_id,
-            )
-            .await;
+            if tries < 2 {
+                Self::generation_future(
+                    chunk_pos,
+                    voxel_size,
+                    data_resolution,
+                    seed,
+                    hash.clone(),
+                    root_id,
+                    tries + 1,
+                )
+                .await;
+                return;
+            } else {
+                return;
+            }
         }
 
         // load into godot arrays
@@ -243,6 +250,7 @@ impl ThreadedGenerator {
                     self.seed,
                     hash,
                     self.root_id,
+                    1,
                 ));
         });
     }
